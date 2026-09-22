@@ -6,6 +6,7 @@ from pathlib import Path
 import flet as ft
 
 from services.auth import AuthError, AuthService, User
+from services.commerce import CommerceService
 from services.recommendation import CropRecommender, FEATURES
 
 ROOT = Path(__file__).resolve().parent
@@ -14,6 +15,7 @@ recommender = CropRecommender(
     ROOT / "Crop_recommendation.csv",
     os.getenv("RECOMMENDATION_DATABASE_PATH", str(ROOT / "recommendation_data.db")),
 )
+commerce = CommerceService()
 
 
 def main(page: ft.Page) -> None:
@@ -67,19 +69,26 @@ def main(page: ft.Page) -> None:
     def register_view() -> ft.View:
         name, email = field("Full name"), field("Email")
         department, semester = field("Farm / department"), field("Experience or season")
+        role = ft.Dropdown(label="How will you use Farmers' Choice?", value="Farmer", options=[
+            ft.dropdown.Option("Farmer"),
+            ft.dropdown.Option("Laborer"),
+            ft.dropdown.Option("Buyer"),
+            ft.dropdown.Option("Seller"),
+            ft.dropdown.Option("Sponsor"),
+        ])
         password, confirm = field("Password (8+ characters)", True), field("Confirm password", True)
         def submit(_: ft.ControlEvent) -> None:
             if password.value != confirm.value:
                 show("Passwords do not match.", True)
                 return
             try:
-                session["user"] = auth.register(name.value, email.value, password.value, department.value, semester.value)
+                session["user"] = auth.register(name.value, email.value, password.value, department.value, semester.value, role.value)
                 navigate("/home")
             except AuthError as error:
                 show(str(error), True)
         return ft.View("/register", [ft.Column([
             ft.TextButton("Back", icon=ft.Icons.ARROW_BACK, on_click=lambda _: navigate("/")),
-            header("Create your account", "Your recommendations stay in your local database."), name, email, department, semester, password, confirm,
+            header("Create your account", "Choose a workspace and start with only the information you want to share."), name, email, department, semester, role, password, confirm,
             ft.FilledButton("Register", icon=ft.Icons.PERSON_ADD, on_click=submit, width=220),
             ft.TextButton("Already registered? Log in", on_click=lambda _: navigate("/login")),
         ], spacing=12)])
@@ -381,6 +390,283 @@ def main(page: ft.Page) -> None:
             session["user"] = None
             navigate("/")
 
+        def worker_card(worker) -> ft.Container:
+            review = ft.TextField(label="Add a recommendation", dense=True, expand=True)
+
+            def recommend_worker(_: ft.ControlEvent) -> None:
+                if review.value.strip():
+                    worker.recommendations.insert(0, review.value.strip())
+                    review.value = ""
+                    show(f"Recommendation added for {worker.name}.")
+                    page.update()
+
+            return ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Column([
+                            ft.Text(worker.name, size=16, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                            ft.Text(f"{worker.trade} • {worker.location}", size=12, color="#526257"),
+                        ], expand=True),
+                        ft.Text(f"★ {worker.rating:.1f}", size=14, weight=ft.FontWeight.BOLD, color="#D9822B"),
+                    ]),
+                    ft.Text(worker.bio, size=12, color="#526257"),
+                    ft.Text(" • ".join(worker.skills), size=12, color="#2B7A4B"),
+                    ft.Text(f"{worker.completed_jobs} completed jobs • {'Verified profile' if worker.verified else 'Unverified'}", size=11, color="#6A7A72"),
+                    ft.Text("Recent comments", size=12, weight=ft.FontWeight.BOLD, color="#214336"),
+                    *[ft.Text(f'“{comment}”', size=12, color="#526257") for comment in worker.comments[:2]],
+                    ft.Row([review, ft.IconButton(ft.Icons.SEND, tooltip="Recommend this worker", on_click=recommend_worker)], spacing=6),
+                ], spacing=8),
+                padding=14,
+                bgcolor="#F7FAF7",
+                border_radius=14,
+            )
+
+        worker_search = ft.TextField(label="Search workers by skill or location", prefix_icon=ft.Icons.SEARCH, expand=True)
+        worker_results = ft.Column([worker_card(worker) for worker in commerce.search_workers()], spacing=10)
+
+        def search_workers(_: ft.ControlEvent) -> None:
+            worker_results.controls = [worker_card(worker) for worker in commerce.search_workers(worker_search.value)]
+            page.update()
+
+        listing_search = ft.TextField(label="Search products, inputs, or equipment", prefix_icon=ft.Icons.SEARCH, expand=True)
+        listing_results = ft.Column([], spacing=10)
+        order_rows = ft.Column([], spacing=8)
+
+        def listing_card(listing) -> ft.Container:
+            quantity = ft.TextField(label="Qty", value="1", width=70, dense=True)
+
+            def checkout(_: ft.ControlEvent) -> None:
+                try:
+                    order = commerce.create_order(user.name, listing, int(quantity.value))
+                    order_rows.controls.insert(0, ft.Container(content=ft.Column([
+                        ft.Text(f"{order.product} • {order.quantity} unit(s) • KES {order.total:,.0f}", weight=ft.FontWeight.BOLD, color="#173E2B"),
+                        ft.Text(f"{order.status} • Escrow: {order.escrow_status} • Delivery: {order.delivery_status}", size=12, color="#526257"),
+                        ft.Row([
+                            ft.TextButton("Fund escrow", icon=ft.Icons.LOCK, on_click=lambda _: commerce.fund_escrow(order)),
+                            ft.TextButton("Report issue", icon=ft.Icons.FLAG, on_click=lambda _: commerce.report_order(order)),
+                        ]),
+                    ], spacing=4), padding=10, bgcolor="#F7FAF7", border_radius=10))
+                    show("Order created. Review the order panel to continue checkout.")
+                    page.update()
+                except (ValueError, TypeError):
+                    show("Choose an available quantity.", True)
+
+            return ft.Container(
+                content=ft.Row([
+                    ft.Column([
+                        ft.Text(listing.title, size=15, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                        ft.Text(f"{listing.category} • {listing.seller} • {listing.location}", size=12, color="#526257"),
+                        ft.Text(listing.description, size=12, color="#526257"),
+                        ft.Text(f"{listing.stock} available • {listing.unit}", size=11, color="#6A7A72"),
+                    ], expand=True),
+                    ft.Column([
+                        ft.Text(f"KES {listing.price:,.0f}", size=16, weight=ft.FontWeight.BOLD, color="#2B7A4B"),
+                        ft.Row([quantity, ft.IconButton(ft.Icons.SHOPPING_CART_CHECKOUT, tooltip="Checkout", on_click=checkout)], spacing=4),
+                    ], horizontal_alignment=ft.CrossAxisAlignment.END),
+                ], spacing=12),
+                padding=14,
+                bgcolor="#F7FAF7",
+                border_radius=14,
+            )
+
+        def search_listings(_: ft.ControlEvent) -> None:
+            listing_results.controls = [listing_card(listing) for listing in commerce.search_listings(listing_search.value)]
+            page.update()
+
+        listing_results.controls = [listing_card(listing) for listing in commerce.listings]
+        buyer_product = ft.TextField(label="Product wanted", expand=True)
+        buyer_quantity = ft.TextField(label="Quantity", width=150)
+        buyer_location = ft.TextField(label="Delivery location", expand=True)
+        request_rows = ft.Column([], spacing=8)
+
+        def create_buyer_request(_: ft.ControlEvent) -> None:
+            if not buyer_product.value.strip() or not buyer_quantity.value.strip() or not buyer_location.value.strip():
+                show("Complete the buyer request details.", True)
+                return
+            request = commerce.create_buyer_request(user.name, buyer_product.value, buyer_quantity.value, buyer_location.value)
+            request_rows.controls.insert(0, ft.Text(f"{request.product} • {request.quantity} • {request.location} • {request.status}", color="#526257"))
+            buyer_product.value = buyer_quantity.value = buyer_location.value = ""
+            show("Buyer request published.")
+            page.update()
+
+        payment_amount = ft.TextField(label="Amount (KES)", keyboard_type=ft.KeyboardType.NUMBER, expand=True)
+        payment_recipient = ft.TextField(label="Recipient or seller", expand=True)
+        payment_method = ft.Dropdown(label="Payment method", value="Mobile money", options=[ft.dropdown.Option("Mobile money"), ft.dropdown.Option("Bank transfer"), ft.dropdown.Option("Card")], expand=True)
+        payment_rows = ft.Column([], spacing=8)
+
+        def create_payment(_: ft.ControlEvent) -> None:
+            try:
+                payment = commerce.create_payment(float(payment_amount.value), payment_recipient.value.strip(), payment_method.value)
+                payment_rows.controls.insert(0, ft.Text(f"{payment.reference} • KES {payment.amount:,.0f} • {payment.status}", color="#526257"))
+                show(f"Payment request {payment.reference} created.")
+                page.update()
+            except (ValueError, TypeError):
+                show("Enter a valid amount and recipient.", True)
+
+        qr_label = ft.TextField(label="QR label", value="North field harvest batch", expand=True)
+        qr_result = ft.Text("No QR payload created yet.", color="#526257", selectable=True)
+
+        def create_qr(_: ft.ControlEvent) -> None:
+            qr_result.value = commerce.qr_payload("farm", f"user-{user.id}", qr_label.value.strip() or "farm")
+            page.update()
+
+        plan_value = ft.Text("Professional plan", size=18, weight=ft.FontWeight.BOLD, color="#173E2B")
+
+        def choose_upgrade(plan: str) -> None:
+            plan_value.value = f"Selected plan: {plan}"
+            show(f"{plan} selected. Connect billing to activate it.")
+            page.update()
+
+        automation_toggle = ft.Switch(label="Automatic data refresh", value=True)
+        alerts_toggle = ft.Switch(label="Actionable alerts", value=True)
+        language = ft.Dropdown(label="Language", value="English", options=[ft.dropdown.Option("English"), ft.dropdown.Option("Kiswahili")], width=220)
+
+        workforce_page = ft.Column([
+            ft.Text("Trusted farm workforce", size=22, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Text("Find skilled people, inspect their work history, and leave useful recommendations.", color="#526257"),
+            ft.Row([worker_search, ft.FilledButton("Search", icon=ft.Icons.SEARCH, on_click=search_workers)], expand=True),
+            worker_results,
+        ], spacing=12, scroll=ft.ScrollMode.AUTO)
+
+        marketplace_page = ft.Column([
+            ft.Text("Farm marketplace", size=22, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Text("Buy inputs and equipment, or connect with verified sellers.", color="#526257"),
+            ft.Row([listing_search, ft.FilledButton("Search", icon=ft.Icons.SEARCH, on_click=search_listings)], expand=True),
+            listing_results,
+            ft.Text("Orders and secure checkout", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            order_rows,
+            ft.Divider(),
+            ft.Text("Publish a buyer request", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Row([buyer_product, buyer_quantity, buyer_location, ft.FilledButton("Publish", icon=ft.Icons.POST_ADD, on_click=create_buyer_request)], wrap=True),
+            request_rows,
+        ], spacing=12, scroll=ft.ScrollMode.AUTO)
+
+        sponsors_page = ft.Column([
+            ft.Text("Sponsors and farm funding", size=22, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Text("Discover programs that support resilient farms and farmer livelihoods.", color="#526257"),
+            *[ft.Container(content=ft.Column([
+                ft.Row([ft.Text(sponsor.name, size=16, weight=ft.FontWeight.BOLD, color="#173E2B"), ft.Text("Verified", color="#2B7A4B")], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.Text(f"{sponsor.focus} • {sponsor.location}", size=12, color="#D9822B"),
+                ft.Text(sponsor.description, size=12, color="#526257"),
+                ft.TextButton("View eligibility", icon=ft.Icons.OPEN_IN_NEW, on_click=lambda _, name=sponsor.name: show(f"Eligibility checklist opened for {name}.")),
+            ], spacing=6), padding=14, bgcolor="#F7FAF7", border_radius=14) for sponsor in commerce.sponsors],
+        ], spacing=12, scroll=ft.ScrollMode.AUTO)
+
+        payments_page = ft.Column([
+            ft.Text("Payments and traceability", size=22, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Text("Create payment requests and generate scannable farm identity payloads.", color="#526257"),
+            ft.Text("New payment", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Row([payment_amount, payment_recipient, payment_method, ft.FilledButton("Create request", icon=ft.Icons.PAYMENTS, on_click=create_payment)], wrap=True),
+            payment_rows,
+            ft.Divider(),
+            ft.Text("QR identity and product traceability", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Row([qr_label, ft.FilledButton("Generate QR payload", icon=ft.Icons.QR_CODE_2, on_click=create_qr)], expand=True),
+            qr_result,
+        ], spacing=12, scroll=ft.ScrollMode.AUTO)
+
+        settings_page = ft.Column([
+            ft.Text("Settings and account", size=22, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Text("Control automation, language, security, and your commercial workspace.", color="#526257"),
+            ft.Container(content=ft.Column([
+                ft.Text("Automation", size=16, weight=ft.FontWeight.BOLD, color="#173E2B"), automation_toggle, alerts_toggle,
+                ft.Text("These controls affect how the workspace presents synchronized data and alerts.", size=12, color="#526257"),
+            ], spacing=8), padding=14, bgcolor="#F7FAF7", border_radius=14),
+            ft.Container(content=ft.Column([
+                ft.Text("Language and access", size=16, weight=ft.FontWeight.BOLD, color="#173E2B"), language,
+                ft.Text("Sign in faster", size=14, weight=ft.FontWeight.BOLD, color="#214336"),
+                ft.Row([ft.OutlinedButton("Continue with Google", icon=ft.Icons.ACCOUNT_CIRCLE, on_click=lambda _: show("OAuth provider connection is ready for configuration.")), ft.OutlinedButton("Continue with Microsoft", icon=ft.Icons.WORKSPACE_PREMIUM, on_click=lambda _: show("OAuth provider connection is ready for configuration."))], wrap=True),
+            ], spacing=8), padding=14, bgcolor="#F7FAF7", border_radius=14),
+            ft.Container(content=ft.Column([
+                ft.Text("Plans and upgrades", size=16, weight=ft.FontWeight.BOLD, color="#173E2B"), plan_value,
+                ft.Text("Unlock team workspaces, exportable reports, and advanced market monitoring.", size=12, color="#526257"),
+                ft.Row([ft.OutlinedButton("Starter", on_click=lambda _: choose_upgrade("Starter")), ft.OutlinedButton("Professional", on_click=lambda _: choose_upgrade("Professional")), ft.FilledButton("Cooperative", icon=ft.Icons.GROUPS, on_click=lambda _: choose_upgrade("Cooperative"))], wrap=True),
+            ], spacing=8), padding=14, bgcolor="#F7FAF7", border_radius=14),
+        ], spacing=12, scroll=ft.ScrollMode.AUTO)
+
+        job_title = ft.TextField(label="Work needed", expand=True)
+        job_location = ft.TextField(label="Location", width=150)
+        job_budget = ft.TextField(label="Budget", width=120)
+        job_schedule = ft.TextField(label="Schedule", width=150)
+        job_rows = ft.Column([], spacing=8)
+
+        def refresh_jobs() -> None:
+            job_rows.controls = []
+            for job in commerce.jobs:
+                job_rows.controls.append(ft.Container(content=ft.Row([
+                    ft.Column([
+                        ft.Text(job.title, size=14, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                        ft.Text(f"{job.location} • {job.schedule} • Budget {job.budget}", size=12, color="#526257"),
+                        ft.Text(f"{len(job.applicants)} applicant(s) • {job.status}", size=11, color="#6A7A72"),
+                    ], expand=True),
+                    ft.FilledButton("Apply", icon=ft.Icons.HANDSHAKE, on_click=lambda _, item=job: (commerce.apply_for_job(item, user.name), show("Application submitted."), page.update())),
+                ], spacing=10), padding=12, bgcolor="#F7FAF7", border_radius=12))
+
+        def post_job(_: ft.ControlEvent) -> None:
+            if not all(value.value.strip() for value in (job_title, job_location, job_budget, job_schedule)):
+                show("Complete all job details.", True)
+                return
+            commerce.create_job(user.name, job_title.value, job_location.value, job_budget.value, job_schedule.value)
+            for value in (job_title, job_location, job_budget, job_schedule):
+                value.value = ""
+            refresh_jobs()
+            show("Job posted to the workforce.")
+            page.update()
+
+        refresh_jobs()
+        jobs_page = ft.Column([
+            ft.Text("Jobs and bookings", size=22, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Text("Farmers can post work; laborers can discover and apply.", color="#526257"),
+            ft.Container(content=ft.Column([
+                ft.Text("Post a job", size=16, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                ft.Row([job_title, job_location, job_budget, job_schedule, ft.FilledButton("Post job", icon=ft.Icons.POST_ADD, on_click=post_job)], wrap=True),
+            ], spacing=8), padding=14, bgcolor="#F7FAF7", border_radius=14),
+            job_rows,
+        ], spacing=12, scroll=ft.ScrollMode.AUTO)
+
+        notifications_page = ft.Column([
+            ft.Text("Notification center", size=22, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Text("Grouped updates for orders, jobs, sponsors, alerts, and account activity.", color="#526257"),
+            *[ft.Container(content=ft.Row([
+                ft.Icon(ft.Icons.NOTIFICATIONS_ACTIVE if not notification.read else ft.Icons.NOTIFICATIONS_NONE, color="#2B7A4B"),
+                ft.Column([ft.Text(notification.title, weight=ft.FontWeight.BOLD, color="#173E2B"), ft.Text(notification.message, size=12, color="#526257")], expand=True),
+                ft.Text(notification.category, size=11, color="#D9822B"),
+            ], spacing=10), padding=12, bgcolor="#F7FAF7", border_radius=12) for notification in commerce.notifications],
+            ft.Divider(),
+            ft.Text("Delivery channels", size=16, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Switch(label="Push notifications", value=True),
+            ft.Switch(label="Email summaries", value=True),
+            ft.Switch(label="SMS for payments and delivery", value=False),
+        ], spacing=10, scroll=ft.ScrollMode.AUTO)
+
+        admin_page = ft.Column([
+            ft.Text("Admin command center", size=22, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Text("Moderate trust signals, review activity, and control platform features.", color="#526257"),
+            ft.Row([
+                build_metric_card("Users", "Active", "#2B7A4B", ft.Icons.PEOPLE),
+                build_metric_card("Orders", str(len(commerce.orders)), "#2563EB", ft.Icons.SHOPPING_BAG),
+                build_metric_card("Audit logs", str(len(commerce.audit_logs)), "#D9822B", ft.Icons.HISTORY),
+            ], wrap=True),
+            ft.Text("Feature flags", size=16, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Switch(label="Marketplace checkout", value=True),
+            ft.Switch(label="Sponsor matching", value=True),
+            ft.Switch(label="Automated alerts", value=True),
+            ft.Text("Trust and moderation queue", size=16, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Text("No unresolved reports. New user reports, disputed orders, and review flags will appear here.", color="#526257"),
+            ft.Text("Recent audit activity", size=16, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            *[ft.Text(f"{log.actor} • {log.action} • {log.target}", size=12, color="#526257") for log in commerce.audit_logs[:10]],
+        ], spacing=10, scroll=ft.ScrollMode.AUTO)
+
+        help_page = ft.Column([
+            ft.Text("Help and support", size=22, weight=ft.FontWeight.BOLD, color="#173E2B"),
+            ft.Text("Answers for everyday farm, marketplace, and account questions.", color="#526257"),
+            ft.ExpansionTile(title=ft.Text("How do payments work?"), controls=[ft.Text("Payments are created as protected requests. Escrow should be funded before work or delivery begins.", color="#526257")]),
+            ft.ExpansionTile(title=ft.Text("How do I trust a laborer or seller?"), controls=[ft.Text("Look for verified badges, completed work, ratings, written reviews, and the dispute path.", color="#526257")]),
+            ft.ExpansionTile(title=ft.Text("Can I use the app offline?"), controls=[ft.Text("Recent recommendations, tasks, and account settings remain available locally. Sync integrations can be enabled as providers are configured.", color="#526257")]),
+            ft.FilledButton("Contact support", icon=ft.Icons.SUPPORT_AGENT, on_click=lambda _: show("Support request started. A support channel can be connected in deployment.")),
+            ft.TextButton("Terms of Service", on_click=lambda _: show("Terms page is ready for your organization policy.")),
+            ft.TextButton("Privacy Policy", on_click=lambda _: show("Privacy page is ready for your organization policy.")),
+        ], spacing=10, scroll=ft.ScrollMode.AUTO)
+
         dashboard = ft.Column([
             ft.Row([
                 ft.Column([
@@ -495,13 +781,37 @@ def main(page: ft.Page) -> None:
             ),
         ], spacing=16)
 
+        common_tabs = [
+            ft.Tab(text="Notifications", icon=ft.Icons.NOTIFICATIONS, content=notifications_page),
+            ft.Tab(text="Help", icon=ft.Icons.HELP_OUTLINE, content=help_page),
+            ft.Tab(text="Settings", icon=ft.Icons.SETTINGS, content=settings_page),
+            ft.Tab(text="Profile", icon=ft.Icons.PERSON, content=ft.Column([name, department, semester, ft.FilledButton("Save profile", icon=ft.Icons.SAVE, on_click=update)], spacing=12)),
+        ]
+        role_tabs = [
+            ft.Tab(text="Dashboard", icon=ft.Icons.HOME, content=dashboard),
+            ft.Tab(text="Recommendation", icon=ft.Icons.SPA, content=ft.Column([ft.Text("Soil and climate inputs", size=20, weight=ft.FontWeight.BOLD), *inputs.values(), ft.FilledButton("Recommend a crop", icon=ft.Icons.AUTO_AWESOME, on_click=recommend), result, details], spacing=10)),
+            ft.Tab(text="Workforce", icon=ft.Icons.GROUPS, content=workforce_page),
+            ft.Tab(text="Jobs", icon=ft.Icons.WORK_HISTORY, content=jobs_page),
+            ft.Tab(text="Marketplace", icon=ft.Icons.STORE, content=marketplace_page),
+            ft.Tab(text="Sponsors", icon=ft.Icons.VOLUNTEER_ACTIVISM, content=sponsors_page),
+            ft.Tab(text="Payments", icon=ft.Icons.PAYMENTS, content=payments_page),
+        ]
+        if user.role in {"Laborer", "Buyer", "Seller", "Sponsor"}:
+            role_tabs = [tab for tab in role_tabs if tab.text not in {"Dashboard", "Recommendation"}]
+        if user.role == "Laborer":
+            role_tabs = [tab for tab in role_tabs if tab.text not in {"Sponsors"}]
+        elif user.role == "Buyer":
+            role_tabs = [tab for tab in role_tabs if tab.text not in {"Recommendation", "Sponsors", "Workforce"}]
+        elif user.role == "Seller":
+            role_tabs = [tab for tab in role_tabs if tab.text not in {"Recommendation", "Sponsors", "Workforce"}]
+        elif user.role == "Sponsor":
+            role_tabs = [tab for tab in role_tabs if tab.text not in {"Recommendation", "Workforce", "Jobs", "Marketplace"}]
+        if user.role == "Admin":
+            role_tabs = [ft.Tab(text="Admin", icon=ft.Icons.ADMIN_PANEL_SETTINGS, content=admin_page)] + role_tabs
+
         return ft.View("/home", [ft.Column([
-            ft.Row([ft.Column([ft.Text(f"Hello, {user.name}", size=26, weight=ft.FontWeight.BOLD), ft.Text(user.email, color="#526257")]), ft.TextButton("Log out", icon=ft.Icons.LOGOUT, on_click=logout)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-            ft.Tabs(tabs=[
-                ft.Tab(text="Dashboard", icon=ft.Icons.HOME, content=dashboard),
-                ft.Tab(text="Recommendation", icon=ft.Icons.SPA, content=ft.Column([ft.Text("Soil and climate inputs", size=20, weight=ft.FontWeight.BOLD), *inputs.values(), ft.FilledButton("Recommend a crop", icon=ft.Icons.AUTO_AWESOME, on_click=recommend), result, details], spacing=10)),
-                ft.Tab(text="Profile", icon=ft.Icons.PERSON, content=ft.Column([name, department, semester, ft.FilledButton("Save profile", icon=ft.Icons.SAVE, on_click=update)], spacing=12)),
-            ], expand=1),
+            ft.Row([ft.Column([ft.Text(f"Hello, {user.name}", size=26, weight=ft.FontWeight.BOLD), ft.Text(f"{user.email} • {user.role} workspace", color="#526257")]), ft.TextButton("Log out", icon=ft.Icons.LOGOUT, on_click=logout)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            ft.Tabs(tabs=role_tabs + common_tabs, expand=1),
         ], spacing=18)])
 
     def route_change(_: ft.RouteChangeEvent) -> None:

@@ -5,6 +5,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
-RUN mkdir -p /data
+RUN useradd --create-home --uid 10001 appuser \
+	&& mkdir -p /data \
+	&& chown -R appuser:appuser /app /data
+USER appuser
 EXPOSE 8550
 CMD ["python", "main.py"]

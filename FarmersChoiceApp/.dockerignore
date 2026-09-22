@@ -3,3 +3,8 @@ __pycache__/
 .idea/
 *.pyc
 user_data.db
+recommendation_data.db
+*.db-shm
+*.db-wal
+.env
+.env.*

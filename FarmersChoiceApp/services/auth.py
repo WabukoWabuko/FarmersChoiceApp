@@ -17,6 +17,7 @@ class User:
     email: str
     department: str
     semester: str
+    role: str = "Farmer"
 
 
 class AuthError(ValueError):
@@ -52,10 +53,14 @@ class AuthService:
                     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
                     department TEXT NOT NULL,
                     semester TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'Farmer',
                     password_hash TEXT NOT NULL,
                     created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 )
             """)
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(users)").fetchall()}
+            if "role" not in columns:
+                connection.execute("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'Farmer'")
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS password_reset_tokens (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -95,15 +100,16 @@ class AuthService:
             raise AuthError("Password must contain at least 8 characters.")
         return name.strip(), email, password, department.strip(), semester.strip()
 
-    def register(self, name: str, email: str, password: str, department: str, semester: str) -> User:
+    def register(self, name: str, email: str, password: str, department: str, semester: str, role: str = "Farmer") -> User:
         name, email, password, department, semester = self._validate(name, email, password, department, semester)
+        role = role if role in {"Farmer", "Laborer", "Buyer", "Seller", "Sponsor"} else "Farmer"
         try:
             with self._connection() as connection:
                 cursor = connection.execute(
-                    "INSERT INTO users (name, email, department, semester, password_hash) VALUES (?, ?, ?, ?, ?)",
-                    (name, email, department, semester, self._hash_password(password)),
+                    "INSERT INTO users (name, email, department, semester, role, password_hash) VALUES (?, ?, ?, ?, ?, ?)",
+                    (name, email, department, semester, role, self._hash_password(password)),
                 )
-                return User(cursor.lastrowid, name, email, department, semester)
+                return User(cursor.lastrowid, name, email, department, semester, role)
         except sqlite3.IntegrityError as error:
             raise AuthError("An account with that email already exists.") from error
 
@@ -112,7 +118,7 @@ class AuthService:
             row = connection.execute("SELECT * FROM users WHERE email = ?", (email.strip().lower(),)).fetchone()
         if not row or not self._verify_password(password, row["password_hash"]):
             raise AuthError("Email or password is incorrect.")
-        return User(row["id"], row["name"], row["email"], row["department"], row["semester"])
+        return User(row["id"], row["name"], row["email"], row["department"], row["semester"], row["role"])
 
     def update_profile(self, user_id: int, name: str, department: str, semester: str) -> User:
         if not name.strip() or not department.strip() or not semester.strip():
@@ -122,7 +128,7 @@ class AuthService:
             row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not row:
             raise AuthError("That account no longer exists.")
-        return User(row["id"], row["name"], row["email"], row["department"], row["semester"])
+        return User(row["id"], row["name"], row["email"], row["department"], row["semester"], row["role"])
 
     def create_reset_token(self, email: str) -> str:
         with self._connection() as connection:

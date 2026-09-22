@@ -55,6 +55,15 @@ class RecommendationTests(unittest.TestCase):
         self.assertTrue(hasattr(recommender.data_manager, "get_weather"))
         self.assertTrue(hasattr(recommender.data_manager, "get_soil"))
 
+    def test_recommendation_history_tracks_changes_over_time(self):
+        recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
+        values = {"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203}
+        record = recommender.record_recommendation(values, farm_id="farm-001", field_name="North field")
+        history = recommender.get_recommendation_history("farm-001")
+        self.assertEqual(record["farm_id"], "farm-001")
+        self.assertGreater(len(history), 0)
+        self.assertIn("crop", history[0])
+
 
 if __name__ == "__main__":
     unittest.main()

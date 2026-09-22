@@ -121,6 +121,7 @@ def main(page: ft.Page) -> None:
         risk_list = ft.Column([], spacing=8)
         alert_list = ft.Column([], spacing=8)
         event_rows = ft.Column([], spacing=8)
+        history_rows = ft.Column([], spacing=8)
         planting_window = ft.Text("Planting window: no recommendation yet", color="#526257")
         ai_prompt = ft.TextField(label="Ask your farm", hint_text="Why did my recommendation change?", expand=True)
 
@@ -212,6 +213,23 @@ def main(page: ft.Page) -> None:
                 build_event_row("12 Sep", "Vegetation pattern remains stable.", ft.Icons.LEAF),
                 build_event_row("14 Sep", "Recommendation recalculated for the next planting cycle.", ft.Icons.REFRESH),
                 build_event_row("17 Sep", f"{crop} became the preferred crop for this field.", ft.Icons.AGRICULTURE),
+            ]
+
+            history = recommender.get_recommendation_history("farm-demo")
+            if not history:
+                history = [{"crop": crop, "timestamp": "just now", "suitability": answer.suitability, "confidence": answer.confidence}]
+
+            history_rows.controls = [
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text(f"{item['crop']} — {item['suitability']}/100", size=15, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                        ft.Text(f"{item['timestamp']} • confidence {item['confidence']}%", size=12, color="#526257"),
+                    ], spacing=2),
+                    padding=12,
+                    bgcolor="#F7FAF7",
+                    border_radius=12,
+                )
+                for item in history
             ]
 
             planting_window.value = f"Recommended planting window: {window} | Confidence: {answer.confidence}%"
@@ -320,6 +338,15 @@ def main(page: ft.Page) -> None:
                 content=ft.Column([
                     ft.Text("Farm event stream", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
                     event_rows,
+                ], spacing=12),
+                padding=18,
+                bgcolor="white",
+                border_radius=18,
+            ),
+            ft.Container(
+                content=ft.Column([
+                    ft.Text("Recommendation history", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                    history_rows,
                 ], spacing=12),
                 padding=18,
                 bgcolor="white",

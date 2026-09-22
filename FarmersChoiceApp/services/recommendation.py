@@ -3,7 +3,7 @@ from __future__ import annotations
 import csv
 import math
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -156,10 +156,30 @@ class DataManager:
         return self.knowledge.fetch(crop)
 
 
+class FarmModel:
+    """Simple in-memory representation of a farm's current digital twin state."""
+
+    def __init__(self, farm_id: str, field_name: str) -> None:
+        self.farm_id = farm_id
+        self.field_name = field_name
+        self.current_crop: str | None = None
+        self.recommendation_history: list[dict[str, object]] = []
+        self.alerts: list[str] = [
+            "Conditions are becoming suitable for planting.",
+            "A brief dry spell remains possible in the coming week.",
+        ]
+
+    def add_recommendation(self, recommendation: dict[str, object]) -> dict[str, object]:
+        self.recommendation_history.append(recommendation)
+        self.current_crop = str(recommendation.get("crop", self.current_crop))
+        return recommendation
+
+
 class CropRecommender:
     def __init__(self, csv_path: str | Path) -> None:
         self.data_manager = DataManager()
         self.rows: list[dict[str, float | str]] = []
+        self.farms: dict[str, FarmModel] = {}
         with Path(csv_path).open(newline="", encoding="utf-8") as file:
             for row in csv.DictReader(file):
                 self.rows.append({**{key: float(row[key]) for key in FEATURES}, "label": row["label"]})
@@ -252,6 +272,29 @@ class CropRecommender:
             sample_count=recommendation.sample_count,
         )
 
+    def record_recommendation(self, values: dict[str, float], farm_id: str, field_name: str, reason: str | None = None) -> dict[str, object]:
+        recommendation = self.recommend(values)
+        explanation = self.explain_recommendation(values)
+        record = {
+            "farm_id": farm_id,
+            "field_name": field_name,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "crop": recommendation.crop,
+            "suitability": recommendation.suitability,
+            "confidence": recommendation.confidence,
+            "sample_count": recommendation.sample_count,
+            "reason": reason or explanation.summary,
+            "reasons": explanation.reasons,
+            "data_confidence": explanation.data_confidence,
+        }
+        if farm_id not in self.farms:
+            self.farms[farm_id] = FarmModel(farm_id, field_name)
+        self.farms[farm_id].add_recommendation(record)
+        return record
+
+    def get_recommendation_history(self, farm_id: str) -> list[dict[str, object]]:
+        return self.farms.get(farm_id, FarmModel(farm_id, "default")).recommendation_history
+
 
 __all__ = [
     "FEATURES",
@@ -263,6 +306,7 @@ __all__ = [
     "TerrainProvider",
     "MarketProvider",
     "AgriculturalKnowledgeProvider",
+    "FarmModel",
     "CropRecommender",
     "Recommendation",
     "RecommendationExplanation",

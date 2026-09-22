@@ -189,6 +189,8 @@ def main(page: ft.Page) -> None:
             season_plan = recommender.build_season_plan(values, crop)
             maize_sim = recommender.simulate_crop(values, "maize")
             sorghum_sim = recommender.simulate_crop(values, "sorghum")
+            maize_base = maize_sim["economic_scenarios"][1]
+            sorghum_base = sorghum_sim["economic_scenarios"][1]
             crop_window = f"{window['start']}–{window['end']}"
             if crop.lower() == "rice":
                 crop_window = f"{window['start']}–{window['end']}"
@@ -297,6 +299,7 @@ def main(page: ft.Page) -> None:
                     content=ft.Column([
                         ft.Text("What if I plant maize?", size=13, weight=ft.FontWeight.BOLD, color="#173E2B"),
                         ft.Text(f"Suitability: {maize_sim['suitability']}/100 • Water: {maize_sim['water_requirement']} • Risk: {maize_sim['weather_risk']}", size=12, color="#526257"),
+                        ft.Text(f"Base revenue: KSh {maize_base['revenue']['low']:,}–{maize_base['revenue']['high']:,} • Margin: KSh {maize_base['margin']['low']:,}–{maize_base['margin']['high']:,}", size=12, color="#526257"),
                     ], spacing=2),
                     padding=10,
                     bgcolor="#F7FAF7",
@@ -306,6 +309,7 @@ def main(page: ft.Page) -> None:
                     content=ft.Column([
                         ft.Text("What if I plant sorghum?", size=13, weight=ft.FontWeight.BOLD, color="#173E2B"),
                         ft.Text(f"Suitability: {sorghum_sim['suitability']}/100 • Water: {sorghum_sim['water_requirement']} • Risk: {sorghum_sim['weather_risk']}", size=12, color="#526257"),
+                        ft.Text(f"Base revenue: KSh {sorghum_base['revenue']['low']:,}–{sorghum_base['revenue']['high']:,} • Margin: KSh {sorghum_base['margin']['low']:,}–{sorghum_base['margin']['high']:,}", size=12, color="#526257"),
                     ], spacing=2),
                     padding=10,
                     bgcolor="#F7FAF7",

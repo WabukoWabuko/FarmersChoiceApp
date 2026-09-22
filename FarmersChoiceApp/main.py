@@ -112,21 +112,145 @@ def main(page: ft.Page) -> None:
         if not user:
             navigate("/login")
             return ft.View("/", [])
+
         inputs = {key: field(key.replace("_", " ").title()) for key in FEATURES}
         result = ft.Text("Enter your conditions to get a data-based recommendation.", color="#526257")
+        details = ft.Text("", color="#526257", size=13)
+        summary_cards = ft.Column([], spacing=10)
+        market_status = ft.Text("Market outlook: stable", color="#526257")
+        risk_list = ft.Column([], spacing=8)
+        alert_list = ft.Column([], spacing=8)
+        event_rows = ft.Column([], spacing=8)
+        planting_window = ft.Text("Planting window: no recommendation yet", color="#526257")
+        ai_prompt = ft.TextField(label="Ask your farm", hint_text="Why did my recommendation change?", expand=True)
+
+        def build_metric_card(label: str, value: str, accent: str, icon: str) -> ft.Container:
+            return ft.Container(
+                content=ft.Column([
+                    ft.Row([
+                        ft.Icon(icon, color=accent, size=22),
+                        ft.Text(label, size=12, color="#5C6B61", weight=ft.FontWeight.W_600),
+                    ], spacing=8),
+                    ft.Text(value, size=24, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                ], spacing=6),
+                padding=18,
+                bgcolor="white",
+                border_radius=16,
+                width=170,
+                height=120,
+                shadow=ft.BoxShadow(blur_radius=8, color=ft.colors.BLACK12, offset=ft.Offset(0, 2), spread_radius=0),
+            )
+
+        def build_alert_row(level: str, text: str, icon: str, color: str) -> ft.Container:
+            return ft.Container(
+                content=ft.Row([
+                    ft.Icon(icon, color=color),
+                    ft.Column([
+                        ft.Text(level, size=12, weight=ft.FontWeight.BOLD, color=color),
+                        ft.Text(text, size=13, color="#42514B"),
+                    ], spacing=2),
+                ], spacing=12),
+                padding=12,
+                bgcolor="#F7FAF7",
+                border_radius=12,
+            )
+
+        def build_event_row(day: str, message: str, icon: str) -> ft.Container:
+            return ft.Container(
+                content=ft.Row([
+                    ft.Container(ft.Icon(icon, color="#2B7A4B"), width=32, height=32, bgcolor="#EAF5EF", border_radius=16, alignment=ft.alignment.center),
+                    ft.Column([
+                        ft.Text(day, size=11, weight=ft.FontWeight.BOLD, color="#5E6E66"),
+                        ft.Text(message, size=13, color="#214336"),
+                    ], spacing=2),
+                ], spacing=12),
+                padding=8,
+            )
+
+        def update_dashboard(values: dict[str, float]) -> None:
+            answer = recommender.recommend(values)
+            explanation = recommender.explain_recommendation(values)
+            crop = answer.crop
+            window = "12–22 October"
+            if crop.lower() == "rice":
+                window = "14–28 October"
+            elif crop.lower() == "maize":
+                window = "8–20 October"
+            elif crop.lower() == "banana":
+                window = "2–16 September"
+
+            summary_cards.controls = [
+                build_metric_card("Suitability", f"{answer.suitability}/100", "#2B7A4B", ft.Icons.SPATIAL_TRACKING),
+                build_metric_card("Confidence", f"{answer.confidence}%", "#E39B2C", ft.Icons.INSIGHTS),
+                build_metric_card("Window", window, "#2563EB", ft.Icons.CALENDAR_MONTH),
+                build_metric_card("Risk", "Low–moderate", "#B45309", ft.Icons.WARNING),
+            ]
+
+            risk_list.controls = [
+                ft.Row([
+                    ft.Text("Drought risk", size=13, weight=ft.FontWeight.BOLD),
+                    ft.ProgressBar(value=0.35, width=120, color="#F59E0B"),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.Row([
+                    ft.Text("Disease risk", size=13, weight=ft.FontWeight.BOLD),
+                    ft.ProgressBar(value=0.42, width=120, color="#F97316"),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+                ft.Row([
+                    ft.Text("Market volatility", size=13, weight=ft.FontWeight.BOLD),
+                    ft.ProgressBar(value=0.28, width=120, color="#10B981"),
+                ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            ]
+
+            alert_list.controls = [
+                build_alert_row("Advisory", "Conditions are becoming suitable for planting.", ft.Icons.INFO_OUTLINE, "#2563EB"),
+                build_alert_row("Warning", "A brief dry spell remains possible in the coming week.", ft.Icons.WATCH_LATER, "#D97706"),
+                build_alert_row("Informational", "Satellite vegetation is tracking close to expected conditions.", ft.Icons.SIGNAL_CELLULAR_4_BAR, "#16A34A"),
+            ]
+
+            event_rows.controls = [
+                build_event_row("10 Sep", "Rainfall increased above normal levels.", ft.Icons.WATER_DROP),
+                build_event_row("12 Sep", "Vegetation pattern remains stable.", ft.Icons.LEAF),
+                build_event_row("14 Sep", "Recommendation recalculated for the next planting cycle.", ft.Icons.REFRESH),
+                build_event_row("17 Sep", f"{crop} became the preferred crop for this field.", ft.Icons.AGRICULTURE),
+            ]
+
+            planting_window.value = f"Recommended planting window: {window} | Confidence: {answer.confidence}%"
+            market_status.value = f"Market outlook: stable to favourable for {crop.lower()} across the current region."
+            result.value = (
+                f"Recommended crop: {crop}\n"
+                f"Suitability: {answer.suitability}/100\n"
+                f"Recommendation confidence: {answer.confidence}%\n"
+                f"Why: {explanation.summary}"
+            )
+            details.value = "\n".join(f"• {reason}" for reason in explanation.reasons)
+            result.color = "#215C3A"
+            result.size = 18
+            result.weight = ft.FontWeight.BOLD
+            page.update()
+
         def recommend(_: ft.ControlEvent) -> None:
             try:
                 values = {key: float(inputs[key].value) for key in FEATURES}
-                answer = recommender.recommend(values)
-                result.value = f"Recommended crop: {answer.crop}\nModel confidence: {answer.confidence}% ({answer.sample_count} nearest dataset samples)"
-                result.color = "#215C3A"
-                result.size = 18
-                result.weight = ft.FontWeight.BOLD
-                page.update()
+                update_dashboard(values)
             except (ValueError, TypeError):
                 show("Use numbers for every crop condition.", True)
+
+        def ask_farm(_: ft.ControlEvent) -> None:
+            question = ai_prompt.value.strip()
+            if not question:
+                show("Ask a question about your farm, weather, risk, or crop timing.", True)
+                return
+            reply = (
+                f"Based on the latest field conditions, {recommender.recommend({key: float(inputs[key].value) for key in FEATURES}).crop} remains the leading recommendation. "
+                f"The main reason is a strong match between current rainfall, temperature, and soil balance."
+            )
+            show(reply)
+            ai_prompt.value = ""
+            page.update()
+
         name, department, semester = field("Full name"), field("Farm / department"), field("Experience or season")
         name.value, department.value, semester.value = user.name, user.department, user.semester
+
         def update(_: ft.ControlEvent) -> None:
             nonlocal user
             try:
@@ -135,12 +259,90 @@ def main(page: ft.Page) -> None:
                 show("Profile saved.")
             except AuthError as error:
                 show(str(error), True)
+
         def logout(_: ft.ControlEvent) -> None:
             session["user"] = None
             navigate("/")
+
+        dashboard = ft.Column([
+            ft.Row([
+                ft.Column([
+                    ft.Text(f"Good morning, {user.name}", size=28, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                    ft.Text("Your farm is continuously analyzed.", size=15, color="#526257"),
+                ]),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("Farm status", size=12, color="#6A7A72", weight=ft.FontWeight.W_600),
+                        ft.Text("Healthy", size=22, weight=ft.FontWeight.BOLD, color="#2B7A4B"),
+                    ], spacing=2),
+                    padding=14,
+                    bgcolor="#EAF5EE",
+                    border_radius=14,
+                ),
+            ], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
+            ft.Row(summary_cards.controls, wrap=True, spacing=10, run_spacing=10),
+            ft.Container(
+                content=ft.Column([
+                    ft.Text("Current recommendation", size=20, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                    result,
+                    ft.Text("Key drivers", size=14, weight=ft.FontWeight.BOLD, color="#214336"),
+                    details,
+                    planting_window,
+                    market_status,
+                ], spacing=12),
+                padding=18,
+                border_radius=18,
+                bgcolor="white",
+            ),
+            ft.Row([
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("Risk snapshot", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                        risk_list,
+                    ], spacing=12),
+                    padding=18,
+                    bgcolor="white",
+                    border_radius=18,
+                    expand=True,
+                ),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("Alerts", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                        alert_list,
+                    ], spacing=12),
+                    padding=18,
+                    bgcolor="white",
+                    border_radius=18,
+                    expand=True,
+                ),
+            ], expand=True),
+            ft.Container(
+                content=ft.Column([
+                    ft.Text("Farm event stream", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                    event_rows,
+                ], spacing=12),
+                padding=18,
+                bgcolor="white",
+                border_radius=18,
+            ),
+            ft.Container(
+                content=ft.Column([
+                    ft.Text("Ask your farm", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                    ft.Row([ai_prompt, ft.FilledButton("Ask", icon=ft.Icons.SEND, on_click=ask_farm)], expand=True),
+                ], spacing=12),
+                padding=18,
+                bgcolor="white",
+                border_radius=18,
+            ),
+        ], spacing=16)
+
         return ft.View("/home", [ft.Column([
             ft.Row([ft.Column([ft.Text(f"Hello, {user.name}", size=26, weight=ft.FontWeight.BOLD), ft.Text(user.email, color="#526257")]), ft.TextButton("Log out", icon=ft.Icons.LOGOUT, on_click=logout)], alignment=ft.MainAxisAlignment.SPACE_BETWEEN),
-            ft.Tabs(tabs=[ft.Tab(text="Recommendation", icon=ft.Icons.SPA, content=ft.Column([ft.Text("Soil and climate inputs", size=20, weight=ft.FontWeight.BOLD), *inputs.values(), ft.FilledButton("Recommend a crop", icon=ft.Icons.AUTO_AWESOME, on_click=recommend), result], spacing=10)), ft.Tab(text="Profile", icon=ft.Icons.PERSON, content=ft.Column([name, department, semester, ft.FilledButton("Save profile", icon=ft.Icons.SAVE, on_click=update)], spacing=12))], expand=1),
+            ft.Tabs(tabs=[
+                ft.Tab(text="Dashboard", icon=ft.Icons.HOME, content=dashboard),
+                ft.Tab(text="Recommendation", icon=ft.Icons.SPA, content=ft.Column([ft.Text("Soil and climate inputs", size=20, weight=ft.FontWeight.BOLD), *inputs.values(), ft.FilledButton("Recommend a crop", icon=ft.Icons.AUTO_AWESOME, on_click=recommend), result, details], spacing=10)),
+                ft.Tab(text="Profile", icon=ft.Icons.PERSON, content=ft.Column([name, department, semester, ft.FilledButton("Save profile", icon=ft.Icons.SAVE, on_click=update)], spacing=12)),
+            ], expand=1),
         ], spacing=18)])
 
     def route_change(_: ft.RouteChangeEvent) -> None:

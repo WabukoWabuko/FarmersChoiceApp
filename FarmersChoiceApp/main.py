@@ -230,7 +230,13 @@ def main(page: ft.Page) -> None:
                 build_event_row("17 Sep", f"{crop} became the preferred crop for this field.", ft.Icons.AGRICULTURE),
             ]
 
-            history = recommender.get_recommendation_history("farm-demo")
+            recommender.record_recommendation(
+                values,
+                farm_id=f"user-{user.id}",
+                field_name=user.department,
+                reason="Dashboard recommendation generated from the submitted field conditions.",
+            )
+            history = recommender.get_recommendation_history(f"user-{user.id}")
             if not history:
                 history = [{"crop": crop, "timestamp": "just now", "suitability": answer.suitability, "confidence": answer.confidence}]
 
@@ -341,11 +347,15 @@ def main(page: ft.Page) -> None:
             if not question:
                 show("Ask a question about your farm, weather, risk, or crop timing.", True)
                 return
-            reply = (
-                f"Based on the latest field conditions, {recommender.recommend({key: float(inputs[key].value) for key in FEATURES}).crop} remains the leading recommendation. "
-                f"The main reason is a strong match between current rainfall, temperature, and soil balance."
-            )
-            show(reply)
+            try:
+                values = {key: float(inputs[key].value) for key in FEATURES}
+                answer = recommender.recommend(values)
+                show(
+                    f"Based on the latest field conditions, {answer.crop} remains the leading recommendation. "
+                    "The main reason is a strong match between current rainfall, temperature, and soil balance."
+                )
+            except (ValueError, TypeError):
+                show("Complete every field with valid values before asking your farm a question.", True)
             ai_prompt.value = ""
             page.update()
 

@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+from services.data_pipeline import DataSourceRegistry
+
 FEATURES = ("N", "P", "K", "temperature", "humidity", "ph", "rainfall")
 
 
@@ -133,6 +135,7 @@ class DataManager:
     """Central orchestration layer for external agricultural data sources."""
 
     def __init__(self):
+        self.sources = DataSourceRegistry()
         self.weather = WeatherProvider()
         self.satellite = SatelliteProvider()
         self.soil = SoilProvider()
@@ -157,6 +160,9 @@ class DataManager:
 
     def get_crop_knowledge(self, crop: str):
         return self.knowledge.fetch(crop)
+
+    def get_source_status(self) -> list[dict[str, object]]:
+        return [self.sources.status(source.key) for source in self.sources.list()]
 
 
 class RecommendationStore:
@@ -264,6 +270,22 @@ class CropRecommender:
     def recommend(self, values: dict[str, float]) -> Recommendation:
         if set(values) != set(FEATURES):
             raise ValueError("All crop inputs are required.")
+        limits = {
+            "N": (0, 200),
+            "P": (0, 200),
+            "K": (0, 250),
+            "temperature": (-20, 60),
+            "humidity": (0, 100),
+            "ph": (0, 14),
+            "rainfall": (0, 5000),
+        }
+        for feature, (minimum, maximum) in limits.items():
+            try:
+                value = float(values[feature])
+            except (TypeError, ValueError) as error:
+                raise ValueError(f"{feature} must be a number.") from error
+            if not math.isfinite(value) or not minimum <= value <= maximum:
+                raise ValueError(f"{feature} must be between {minimum} and {maximum}.")
         distances = []
         for row in self.rows:
             distance = math.sqrt(sum((float(values[key]) - float(row[key])) ** 2 for key in FEATURES))
@@ -641,6 +663,7 @@ __all__ = [
     "TerrainProvider",
     "MarketProvider",
     "AgriculturalKnowledgeProvider",
+    "DataSourceRegistry",
     "RecommendationStore",
     "FarmModel",
     "CropRecommender",

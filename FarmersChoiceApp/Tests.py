@@ -1,8 +1,10 @@
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 
 from services.auth import AuthError, AuthService
+from services.data_pipeline import DataSourceRegistry, DataValidationError, Observation
 from services.recommendation import CropRecommender
 
 
@@ -35,10 +37,32 @@ class AuthTests(unittest.TestCase):
 
 
 class RecommendationTests(unittest.TestCase):
+    def test_data_source_registry_has_replaceable_kenya_sources(self):
+        registry = DataSourceRegistry()
+        keys = {source.key for source in registry.list()}
+        self.assertIn("weather_kmd", keys)
+        self.assertIn("weather_open_meteo", keys)
+        self.assertIn("satellite_sentinel2", keys)
+        self.assertIn("soil_soilgrids", keys)
+
+    def test_observation_validation_rejects_untrusted_metadata(self):
+        registry = DataSourceRegistry()
+        now = datetime.now(timezone.utc)
+        observation = Observation("weather_kmd", "Wrong provider", "temperature", 24, "C", now, now, "station", 0.9)
+        with self.assertRaises(DataValidationError):
+            registry.validate_observation(observation)
+
     def test_recommendation_uses_dataset_nearest_neighbors(self):
         recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
         result = recommender.recommend({"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203})
         self.assertEqual(result.crop, "Rice")
+
+    def test_recommendation_rejects_invalid_observations(self):
+        recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
+        values = {"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203}
+        values["humidity"] = 101
+        with self.assertRaises(ValueError):
+            recommender.recommend(values)
 
     def test_explainable_recommendation_includes_context_and_confidence(self):
         recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")

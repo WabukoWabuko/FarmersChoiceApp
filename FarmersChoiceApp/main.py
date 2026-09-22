@@ -185,6 +185,7 @@ def main(page: ft.Page) -> None:
             alerts = recommender.generate_alerts(values, crop)
             window = recommender.calculate_planting_window(values, crop)
             freshness = recommender.get_data_freshness()
+            source_status = recommender.data_manager.get_source_status()
             season_plan = recommender.build_season_plan(values, crop)
             maize_sim = recommender.simulate_crop(values, "maize")
             sorghum_sim = recommender.simulate_crop(values, "sorghum")
@@ -199,7 +200,7 @@ def main(page: ft.Page) -> None:
             summary_cards.controls = [
                 build_metric_card("Suitability", f"{answer.suitability}/100", "#2B7A4B", ft.Icons.SPATIAL_TRACKING),
                 build_metric_card("Confidence", f"{answer.confidence}%", "#E39B2C", ft.Icons.INSIGHTS),
-                build_metric_card("Window", window, "#2563EB", ft.Icons.CALENDAR_MONTH),
+                build_metric_card("Window", window["best_window"], "#2563EB", ft.Icons.CALENDAR_MONTH),
                 build_metric_card("Risk", "Low–moderate", "#B45309", ft.Icons.WARNING),
             ]
 
@@ -285,10 +286,11 @@ def main(page: ft.Page) -> None:
                     color="#526257",
                 )
             )
+            fresh_count = sum(status["status"] == "fresh" for status in source_status)
             freshness_panel.value = (
-                f"Data freshness: Weather {freshness['Weather']['updated_minutes_ago']} min ago • "
-                f"Satellite {freshness['Satellite']['updated_days_ago']} days ago • "
-                f"Soil revision {freshness['Soil']['dataset_revision']}"
+                f"Data sources: {fresh_count}/{len(source_status)} fresh • "
+                f"Weather {freshness['Weather']['updated_minutes_ago']} min ago • "
+                f"Satellite {freshness['Satellite']['updated_days_ago']} days ago"
             )
             scenario_rows.controls = [
                 ft.Container(

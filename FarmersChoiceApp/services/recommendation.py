@@ -575,6 +575,94 @@ class CropRecommender:
             "tasks": tasks,
         }
 
+    def assess_risks(self, values: dict[str, float], crop_name: str) -> list[dict[str, object]]:
+        rainfall = float(values.get("rainfall", 0.0))
+        temperature = float(values.get("temperature", 0.0))
+        humidity = float(values.get("humidity", 0.0))
+        health = self.assess_farm_health(values, crop_name)
+        risks: list[dict[str, object]] = []
+
+        if rainfall < 160:
+            risks.append({"category": "weather", "severity": "warning", "confidence": 0.72, "explanation": "Rainfall is below the crop establishment range.", "action": "Inspect soil moisture and prepare irrigation support."})
+        elif rainfall > 350:
+            risks.append({"category": "weather", "severity": "advisory", "confidence": 0.7, "explanation": "High rainfall can increase waterlogging and flood exposure.", "action": "Check drainage and avoid field work during saturated conditions."})
+        else:
+            risks.append({"category": "weather", "severity": "informational", "confidence": 0.62, "explanation": "Rainfall is within a workable range for the current assessment.", "action": "Continue monitoring the next forecast updates."})
+
+        if humidity >= 85 and temperature >= 25:
+            risks.append({"category": "disease_pest", "severity": "warning", "confidence": 0.68, "explanation": "Warm, humid conditions are favourable for disease pressure.", "action": "Scout leaves and stems and consult an agronomist before treatment."})
+        else:
+            risks.append({"category": "disease_pest", "severity": "advisory", "confidence": 0.5, "explanation": "Available weather inputs do not indicate elevated disease pressure.", "action": "Continue routine weekly scouting."})
+
+        risks.append({
+            "category": "water",
+            "severity": "warning" if health["water_stress"] == "High" else "advisory" if health["water_stress"] == "Moderate" else "informational",
+            "confidence": 0.66,
+            "explanation": f"Water stress is assessed as {health['water_stress'].lower()} from rainfall and field conditions.",
+            "action": "Measure soil moisture before irrigation or drainage decisions.",
+        })
+        if health["nutrient_score"] < 60:
+            risks.append({"category": "soil", "severity": "warning", "confidence": 0.55, "explanation": "The available NPK inputs suggest a possible nutrient constraint.", "action": "Confirm with a soil test before applying fertilizer."})
+        risks.append({"category": "market", "severity": "advisory", "confidence": 0.45, "explanation": "Market price data is not yet connected to a verified live commodity feed.", "action": "Confirm a local buyer and current price before committing production costs."})
+        return risks
+
+    def build_economic_scenarios(self, values: dict[str, float], crop_name: str, area_hectares: float = 1.0) -> dict[str, object]:
+        if not math.isfinite(area_hectares) or area_hectares <= 0:
+            raise ValueError("area_hectares must be greater than zero.")
+        crop_data = {
+            "rice": {"yield": (2200, 4200), "price": (45, 70), "cost": 115000},
+            "maize": {"yield": (1800, 3500), "price": (32, 52), "cost": 82000},
+            "sorghum": {"yield": (1400, 2800), "price": (38, 60), "cost": 60000},
+        }
+        profile = crop_data.get(crop_name.lower(), {"yield": (1500, 3000), "price": (35, 60), "cost": 70000})
+        health = self.assess_farm_health(values, crop_name)
+        health_factor = max(0.55, min(1.05, float(health["overall_health"]) / 85))
+        yield_low, yield_high = profile["yield"]
+        price_low, price_high = profile["price"]
+        base_cost = float(profile["cost"]) * area_hectares
+        scenario_inputs = (
+            ("downside", 0.75, 0.9, 1.12),
+            ("base", 1.0, 1.0, 1.0),
+            ("upside", 1.12, 1.1, 0.94),
+        )
+        scenarios: list[dict[str, object]] = []
+        for name, yield_factor, price_factor, cost_factor in scenario_inputs:
+            scenario_yield = {
+                "low": round(yield_low * health_factor * yield_factor * area_hectares),
+                "high": round(yield_high * health_factor * yield_factor * area_hectares),
+                "unit": "kg total",
+            }
+            scenario_price = {
+                "low": round(price_low * price_factor, 2),
+                "high": round(price_high * price_factor, 2),
+                "unit": "KSh/kg assumption",
+            }
+            revenue = {
+                "low": round(scenario_yield["low"] * scenario_price["low"]),
+                "high": round(scenario_yield["high"] * scenario_price["high"]),
+                "unit": "KSh estimate",
+            }
+            cost = round(base_cost * cost_factor)
+            scenarios.append({
+                "name": name,
+                "yield": scenario_yield,
+                "price": scenario_price,
+                "cost": {"low": round(cost * 0.9), "high": round(cost * 1.1), "unit": "KSh estimate"},
+                "revenue": revenue,
+                "margin": {"low": revenue["low"] - round(cost * 1.1), "high": revenue["high"] - round(cost * 0.9), "unit": "KSh estimate"},
+            })
+        return {
+            "crop": crop_name.title(),
+            "area_hectares": area_hectares,
+            "scenarios": scenarios,
+            "market_risk": "High" if self.data_manager.get_market("Kenya")["trend"] == "volatile" else "Unverified",
+            "assumptions": [
+                "Yield ranges are scenario estimates, not guarantees, and are scaled by the current field-health score.",
+                "Prices are planning assumptions in KSh per kilogram and must be confirmed with a local buyer.",
+                "Costs include indicative production inputs and labour but exclude land, finance, and post-harvest losses.",
+            ],
+        }
+
     def simulate_crop(self, values: dict[str, float], crop_name: str) -> dict[str, object]:
         rainfall = float(values.get("rainfall", 0.0))
         temperature = float(values.get("temperature", 0.0))
@@ -606,6 +694,7 @@ class CropRecommender:
             weather_risk = "Moderate"
             main_risk = "Seasonal rainfall variability"
 
+        economics = self.build_economic_scenarios(values, crop_name)
         return {
             "crop": crop_name.title(),
             "suitability": suitability,
@@ -614,6 +703,7 @@ class CropRecommender:
             "weather_risk": weather_risk,
             "estimated_yield": "1,000–1,400 kg",
             "estimated_revenue": "KSh 60,000–140,000",
+            "economic_scenarios": economics["scenarios"],
             "main_risk": main_risk,
             "soil_score": max(60, min(95, int((rainfall / 3) + (humidity / 2) - 20))),
             "temperature_score": max(50, min(96, int(temperature * 2 + 30))),

@@ -147,6 +147,24 @@ class RecommendationTests(unittest.TestCase):
         self.assertIn("priority", plan["irrigation"])
         self.assertGreater(len(plan["tasks"]), 0)
 
+    def test_economic_scenarios_expose_assumptions_and_risk_ranges(self):
+        recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
+        values = {"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203}
+        scenarios = recommender.build_economic_scenarios(values, "rice", area_hectares=1.0)
+        self.assertEqual(len(scenarios["scenarios"]), 3)
+        self.assertIn("assumptions", scenarios)
+        self.assertIn("market_risk", scenarios)
+        self.assertLessEqual(scenarios["scenarios"][0]["revenue"]["low"], scenarios["scenarios"][0]["revenue"]["high"])
+
+    def test_unified_risk_engine_returns_explainable_categories(self):
+        recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
+        values = {"N": 90, "P": 42, "K": 43, "temperature": 36, "humidity": 88, "ph": 6.5, "rainfall": 420}
+        risks = recommender.assess_risks(values, "rice")
+        categories = {risk["category"] for risk in risks}
+        self.assertIn("weather", categories)
+        self.assertIn("disease_pest", categories)
+        self.assertTrue(all("action" in risk for risk in risks))
+
 
 if __name__ == "__main__":
     unittest.main()

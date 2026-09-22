@@ -64,6 +64,18 @@ class RecommendationTests(unittest.TestCase):
         self.assertGreater(len(history), 0)
         self.assertIn("crop", history[0])
 
+    def test_recommendation_history_can_be_persisted_and_reloaded(self):
+        with tempfile.TemporaryDirectory() as directory:
+            database_path = Path(directory) / "recommendations.db"
+            csv_path = Path(__file__).parent / "Crop_recommendation.csv"
+            values = {"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203}
+            first = CropRecommender(csv_path, database_path)
+            first.record_recommendation(values, farm_id="farm-persistent", field_name="North field")
+            second = CropRecommender(csv_path, database_path)
+            history = second.get_recommendation_history("farm-persistent")
+            self.assertEqual(len(history), 1)
+            self.assertEqual(history[0]["farm_id"], "farm-persistent")
+
     def test_alert_planning_and_freshness_are_available(self):
         recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
         values = {"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203}

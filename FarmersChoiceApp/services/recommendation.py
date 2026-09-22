@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import csv
+import json
 import math
+import sqlite3
 from abc import ABC, abstractmethod
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -156,6 +159,77 @@ class DataManager:
         return self.knowledge.fetch(crop)
 
 
+class RecommendationStore:
+    """Durable storage for recommendation history when a database is configured."""
+
+    def __init__(self, database_path: str | Path) -> None:
+        self.database_path = Path(database_path)
+        self.database_path.parent.mkdir(parents=True, exist_ok=True)
+        with self._connection() as connection:
+            connection.execute("""
+                CREATE TABLE IF NOT EXISTS recommendation_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    farm_id TEXT NOT NULL,
+                    field_name TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    crop TEXT NOT NULL,
+                    suitability REAL NOT NULL,
+                    confidence REAL NOT NULL,
+                    sample_count INTEGER NOT NULL,
+                    reason TEXT NOT NULL,
+                    reasons_json TEXT NOT NULL,
+                    data_confidence_json TEXT NOT NULL
+                )
+            """)
+
+    @contextmanager
+    def _connection(self):
+        connection = sqlite3.connect(self.database_path)
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
+
+    def save(self, record: dict[str, object]) -> None:
+        with self._connection() as connection:
+            connection.execute(
+                """
+                INSERT INTO recommendation_history
+                (farm_id, field_name, timestamp, crop, suitability, confidence, sample_count, reason, reasons_json, data_confidence_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    record["farm_id"], record["field_name"], record["timestamp"], record["crop"],
+                    record["suitability"], record["confidence"], record["sample_count"], record["reason"],
+                    json.dumps(record["reasons"]), json.dumps(record["data_confidence"]),
+                ),
+            )
+
+    def list(self, farm_id: str) -> list[dict[str, object]]:
+        with self._connection() as connection:
+            connection.row_factory = sqlite3.Row
+            rows = connection.execute(
+                "SELECT * FROM recommendation_history WHERE farm_id = ? ORDER BY id DESC",
+                (farm_id,),
+            ).fetchall()
+        return [
+            {
+                "farm_id": row["farm_id"],
+                "field_name": row["field_name"],
+                "timestamp": row["timestamp"],
+                "crop": row["crop"],
+                "suitability": row["suitability"],
+                "confidence": row["confidence"],
+                "sample_count": row["sample_count"],
+                "reason": row["reason"],
+                "reasons": json.loads(row["reasons_json"]),
+                "data_confidence": json.loads(row["data_confidence_json"]),
+            }
+            for row in rows
+        ]
+
+
 class FarmModel:
     """Simple in-memory representation of a farm's current digital twin state."""
 
@@ -176,10 +250,11 @@ class FarmModel:
 
 
 class CropRecommender:
-    def __init__(self, csv_path: str | Path) -> None:
+    def __init__(self, csv_path: str | Path, storage_path: str | Path | None = None) -> None:
         self.data_manager = DataManager()
         self.rows: list[dict[str, float | str]] = []
         self.farms: dict[str, FarmModel] = {}
+        self.store = RecommendationStore(storage_path) if storage_path else None
         with Path(csv_path).open(newline="", encoding="utf-8") as file:
             for row in csv.DictReader(file):
                 self.rows.append({**{key: float(row[key]) for key in FEATURES}, "label": row["label"]})
@@ -290,9 +365,13 @@ class CropRecommender:
         if farm_id not in self.farms:
             self.farms[farm_id] = FarmModel(farm_id, field_name)
         self.farms[farm_id].add_recommendation(record)
+        if self.store:
+            self.store.save(record)
         return record
 
     def get_recommendation_history(self, farm_id: str) -> list[dict[str, object]]:
+        if self.store:
+            return self.store.list(farm_id)
         return self.farms.get(farm_id, FarmModel(farm_id, "default")).recommendation_history
 
     def get_data_freshness(self) -> dict[str, dict[str, object]]:
@@ -562,6 +641,7 @@ __all__ = [
     "TerrainProvider",
     "MarketProvider",
     "AgriculturalKnowledgeProvider",
+    "RecommendationStore",
     "FarmModel",
     "CropRecommender",
     "Recommendation",

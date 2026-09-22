@@ -10,7 +10,10 @@ from services.recommendation import CropRecommender, FEATURES
 
 ROOT = Path(__file__).resolve().parent
 auth = AuthService(os.getenv("DATABASE_PATH", str(ROOT / "user_data.db")))
-recommender = CropRecommender(ROOT / "Crop_recommendation.csv")
+recommender = CropRecommender(
+    ROOT / "Crop_recommendation.csv",
+    os.getenv("RECOMMENDATION_DATABASE_PATH", str(ROOT / "recommendation_data.db")),
+)
 
 
 def main(page: ft.Page) -> None:

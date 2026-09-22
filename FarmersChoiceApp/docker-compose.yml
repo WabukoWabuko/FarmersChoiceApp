@@ -6,6 +6,7 @@ services:
     environment:
       PORT: 8550
       DATABASE_PATH: /data/user_data.db
+      RECOMMENDATION_DATABASE_PATH: /data/recommendation_data.db
     volumes:
       - farmers_choice_data:/data
 

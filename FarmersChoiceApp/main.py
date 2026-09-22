@@ -123,6 +123,9 @@ def main(page: ft.Page) -> None:
         event_rows = ft.Column([], spacing=8)
         history_rows = ft.Column([], spacing=8)
         planting_window = ft.Text("Planting window: no recommendation yet", color="#526257")
+        freshness_panel = ft.Text("Data freshness: Weather 37 min ago • Soil revision 2026-03", color="#526257")
+        scenario_rows = ft.Column([], spacing=8)
+        season_rows = ft.Column([], spacing=8)
         ai_prompt = ft.TextField(label="Ask your farm", hint_text="Why did my recommendation change?", expand=True)
 
         def build_metric_card(label: str, value: str, accent: str, icon: str) -> ft.Container:
@@ -172,13 +175,19 @@ def main(page: ft.Page) -> None:
             answer = recommender.recommend(values)
             explanation = recommender.explain_recommendation(values)
             crop = answer.crop
-            window = "12–22 October"
+            alerts = recommender.generate_alerts(values, crop)
+            window = recommender.calculate_planting_window(values, crop)
+            freshness = recommender.get_data_freshness()
+            season_plan = recommender.build_season_plan(values, crop)
+            maize_sim = recommender.simulate_crop(values, "maize")
+            sorghum_sim = recommender.simulate_crop(values, "sorghum")
+            crop_window = f"{window['start']}–{window['end']}"
             if crop.lower() == "rice":
-                window = "14–28 October"
+                crop_window = f"{window['start']}–{window['end']}"
             elif crop.lower() == "maize":
-                window = "8–20 October"
+                crop_window = f"{window['start']}–{window['end']}"
             elif crop.lower() == "banana":
-                window = "2–16 September"
+                crop_window = f"{window['start']}–{window['end']}"
 
             summary_cards.controls = [
                 build_metric_card("Suitability", f"{answer.suitability}/100", "#2B7A4B", ft.Icons.SPATIAL_TRACKING),
@@ -203,9 +212,8 @@ def main(page: ft.Page) -> None:
             ]
 
             alert_list.controls = [
-                build_alert_row("Advisory", "Conditions are becoming suitable for planting.", ft.Icons.INFO_OUTLINE, "#2563EB"),
-                build_alert_row("Warning", "A brief dry spell remains possible in the coming week.", ft.Icons.WATCH_LATER, "#D97706"),
-                build_alert_row("Informational", "Satellite vegetation is tracking close to expected conditions.", ft.Icons.SIGNAL_CELLULAR_4_BAR, "#16A34A"),
+                build_alert_row(alert["severity"].title(), alert["message"], ft.Icons.INFO_OUTLINE if alert["severity"] == "informational" else ft.Icons.WATCH_LATER if alert["severity"] == "warning" else ft.Icons.WARNING_AMBER, "#2563EB" if alert["severity"] == "informational" else "#D97706" if alert["severity"] == "warning" else "#B45309")
+                for alert in alerts
             ]
 
             event_rows.controls = [
@@ -232,8 +240,46 @@ def main(page: ft.Page) -> None:
                 for item in history
             ]
 
-            planting_window.value = f"Recommended planting window: {window} | Confidence: {answer.confidence}%"
+            planting_window.value = f"Recommended planting window: {crop_window} | Best conditions: {window['best_window']} | Confidence: {window['confidence']}"
             market_status.value = f"Market outlook: stable to favourable for {crop.lower()} across the current region."
+            freshness_panel.value = (
+                f"Data freshness: Weather {freshness['Weather']['updated_minutes_ago']} min ago • "
+                f"Satellite {freshness['Satellite']['updated_days_ago']} days ago • "
+                f"Soil revision {freshness['Soil']['dataset_revision']}"
+            )
+            scenario_rows.controls = [
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("What if I plant maize?", size=13, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                        ft.Text(f"Suitability: {maize_sim['suitability']}/100 • Water: {maize_sim['water_requirement']} • Risk: {maize_sim['weather_risk']}", size=12, color="#526257"),
+                    ], spacing=2),
+                    padding=10,
+                    bgcolor="#F7FAF7",
+                    border_radius=12,
+                ),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("What if I plant sorghum?", size=13, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                        ft.Text(f"Suitability: {sorghum_sim['suitability']}/100 • Water: {sorghum_sim['water_requirement']} • Risk: {sorghum_sim['weather_risk']}", size=12, color="#526257"),
+                    ], spacing=2),
+                    padding=10,
+                    bgcolor="#F7FAF7",
+                    border_radius=12,
+                )
+            ]
+            season_rows.controls = [
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text(f"Planting: {season_plan['planting']}", size=12, color="#214336"),
+                        ft.Text(f"Emergence: {season_plan['emergence']}", size=12, color="#214336"),
+                        ft.Text(f"Monitoring: {season_plan['monitoring']}", size=12, color="#214336"),
+                        ft.Text(f"Harvest: {season_plan['harvest']}", size=12, color="#214336"),
+                    ], spacing=3),
+                    padding=10,
+                    bgcolor="#F7FAF7",
+                    border_radius=12,
+                )
+            ]
             result.value = (
                 f"Recommended crop: {crop}\n"
                 f"Suitability: {answer.suitability}/100\n"
@@ -306,6 +352,7 @@ def main(page: ft.Page) -> None:
                     ft.Text("Key drivers", size=14, weight=ft.FontWeight.BOLD, color="#214336"),
                     details,
                     planting_window,
+                    freshness_panel,
                     market_status,
                 ], spacing=12),
                 padding=18,
@@ -352,6 +399,28 @@ def main(page: ft.Page) -> None:
                 bgcolor="white",
                 border_radius=18,
             ),
+            ft.Row([
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("What-if simulations", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                        scenario_rows,
+                    ], spacing=12),
+                    padding=18,
+                    bgcolor="white",
+                    border_radius=18,
+                    expand=True,
+                ),
+                ft.Container(
+                    content=ft.Column([
+                        ft.Text("Season plan", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                        season_rows,
+                    ], spacing=12),
+                    padding=18,
+                    bgcolor="white",
+                    border_radius=18,
+                    expand=True,
+                ),
+            ], expand=True),
             ft.Container(
                 content=ft.Column([
                     ft.Text("Ask your farm", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),

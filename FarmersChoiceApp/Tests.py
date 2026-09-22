@@ -64,6 +64,31 @@ class RecommendationTests(unittest.TestCase):
         self.assertGreater(len(history), 0)
         self.assertIn("crop", history[0])
 
+    def test_alert_planning_and_freshness_are_available(self):
+        recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
+        values = {"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203}
+        recommendation = recommender.recommend(values)
+        alerts = recommender.generate_alerts(values, recommendation.crop)
+        planting = recommender.calculate_planting_window(values, recommendation.crop)
+        freshness = recommender.get_data_freshness()
+        self.assertGreater(len(alerts), 0)
+        self.assertIn("start", planting)
+        self.assertIn("Weather", freshness)
+        self.assertIn("severity", alerts[0])
+
+    def test_crop_simulation_and_season_plan_are_available(self):
+        recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
+        values = {"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203}
+        maize = recommender.simulate_crop(values, "maize")
+        sorghum = recommender.simulate_crop(values, "sorghum")
+        season = recommender.build_season_plan(values, "maize")
+        self.assertIn("suitability", maize)
+        self.assertIn("growing_period", maize)
+        self.assertIn("planting", season)
+        self.assertIn("harvest", season)
+        self.assertGreater(maize["suitability"], 0)
+        self.assertGreater(sorghum["suitability"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

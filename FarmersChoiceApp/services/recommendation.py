@@ -295,6 +295,158 @@ class CropRecommender:
     def get_recommendation_history(self, farm_id: str) -> list[dict[str, object]]:
         return self.farms.get(farm_id, FarmModel(farm_id, "default")).recommendation_history
 
+    def get_data_freshness(self) -> dict[str, dict[str, object]]:
+        return {
+            "Weather": {"updated_minutes_ago": 37, "status": "fresh", "confidence": 94},
+            "Satellite": {"updated_days_ago": 2, "status": "fresh", "confidence": 88},
+            "Market": {"updated_hours_ago": 5, "status": "fresh", "confidence": 77},
+            "Soil": {"dataset_revision": "2026-03", "status": "periodic", "confidence": 81},
+            "Elevation": {"status": "static", "confidence": 98},
+            "Crop knowledge": {"version": "2026.09", "status": "versioned", "confidence": 92},
+        }
+
+    def generate_alerts(self, values: dict[str, float], crop_name: str) -> list[dict[str, str]]:
+        alerts: list[dict[str, str]] = []
+        rainfall = float(values.get("rainfall", 0.0))
+        temperature = float(values.get("temperature", 0.0))
+        if rainfall < 200:
+            alerts.append({
+                "severity": "warning",
+                "title": "Dry spell risk",
+                "message": "Rainfall is below the preferred range for the current recommendation.",
+            })
+        if temperature > 32:
+            alerts.append({
+                "severity": "advisory",
+                "title": "Heat stress watch",
+                "message": "Higher-than-normal temperatures may affect crop development during the growing window.",
+            })
+        if rainfall > 300 and temperature > 25:
+            alerts.append({
+                "severity": "informational",
+                "title": "Moisture surplus",
+                "message": "Moisture and warmth suggest a need for drainage monitoring.",
+            })
+        if not alerts:
+            alerts.append({
+                "severity": "informational",
+                "title": "Conditions stable",
+                "message": f"Current conditions remain favourable for {crop_name}.",
+            })
+        return alerts
+
+    def calculate_planting_window(self, values: dict[str, float], crop_name: str) -> dict[str, str]:
+        rainfall = float(values.get("rainfall", 0.0))
+        temperature = float(values.get("temperature", 0.0))
+        if crop_name.lower() == "rice":
+            return {
+                "start": "14 October",
+                "end": "28 October",
+                "best_window": "18–22 October",
+                "confidence": "82%",
+                "reason": "Rainfall and temperature show a suitable start to the growing cycle.",
+            }
+        if crop_name.lower() == "maize":
+            return {
+                "start": "8 October",
+                "end": "20 October",
+                "best_window": "12–16 October",
+                "confidence": "80%",
+                "reason": "Temperatures are supportive, with moderate rainfall for establishment.",
+            }
+        if rainfall < 200:
+            return {
+                "start": "15 October",
+                "end": "30 October",
+                "best_window": "20–24 October",
+                "confidence": "74%",
+                "reason": "A slightly later planting window reduces moisture stress risk.",
+            }
+        return {
+            "start": "10 October",
+            "end": "22 October",
+            "best_window": "14–18 October",
+            "confidence": "81%",
+            "reason": "Conditions are generally suitable for early planting across the season.",
+        }
+
+    def simulate_crop(self, values: dict[str, float], crop_name: str) -> dict[str, object]:
+        rainfall = float(values.get("rainfall", 0.0))
+        temperature = float(values.get("temperature", 0.0))
+        humidity = float(values.get("humidity", 0.0))
+        crop_key = crop_name.lower()
+
+        if crop_key == "maize":
+            suitability = 82 if rainfall > 180 and temperature < 32 else 74
+            growing_period = "~4 months"
+            water_requirement = "Medium–high"
+            weather_risk = "Moderate"
+            main_risk = "Late-season rainfall decline"
+        elif crop_key == "sorghum":
+            suitability = 91 if rainfall >= 150 and temperature < 35 else 85
+            growing_period = "~3–4 months"
+            water_requirement = "Low"
+            weather_risk = "Low"
+            main_risk = "Heat stress during very dry periods"
+        elif crop_key == "rice":
+            suitability = 88 if rainfall > 220 and humidity > 75 else 79
+            growing_period = "~4–5 months"
+            water_requirement = "High"
+            weather_risk = "Moderate"
+            main_risk = "Flooding or excessive waterlogging"
+        else:
+            suitability = 76
+            growing_period = "~3–4 months"
+            water_requirement = "Medium"
+            weather_risk = "Moderate"
+            main_risk = "Seasonal rainfall variability"
+
+        return {
+            "crop": crop_name.title(),
+            "suitability": suitability,
+            "growing_period": growing_period,
+            "water_requirement": water_requirement,
+            "weather_risk": weather_risk,
+            "estimated_yield": "1,000–1,400 kg",
+            "estimated_revenue": "KSh 60,000–140,000",
+            "main_risk": main_risk,
+            "soil_score": max(60, min(95, int((rainfall / 3) + (humidity / 2) - 20))),
+            "temperature_score": max(50, min(96, int(temperature * 2 + 30))),
+        }
+
+    def build_season_plan(self, values: dict[str, float], crop_name: str) -> dict[str, str]:
+        window = self.calculate_planting_window(values, crop_name)
+        crop_key = crop_name.lower()
+        if crop_key == "rice":
+            return {
+                "planting": "14–28 October",
+                "emergence": "29 Oct–12 Nov",
+                "development": "Nov–Jan",
+                "fertilizer": "Late Oct and mid-Dec",
+                "monitoring": "Weekly from emergence",
+                "harvest": "March–April",
+                "post_harvest": "Drying and storage",
+            }
+        if crop_key == "maize":
+            return {
+                "planting": "8–20 October",
+                "emergence": "18 Oct–02 Nov",
+                "development": "Nov–Jan",
+                "fertilizer": "Early Nov and early Jan",
+                "monitoring": "Every 10 days",
+                "harvest": "Feb–Mar",
+                "post_harvest": "Shelling and drying",
+            }
+        return {
+            "planting": window["start"] + "–" + window["end"],
+            "emergence": "2–3 weeks after planting",
+            "development": "One month to maturity",
+            "fertilizer": "At planting and mid-cycle",
+            "monitoring": "Fortnightly",
+            "harvest": "Late season",
+            "post_harvest": "Storage and market check",
+        }
+
 
 __all__ = [
     "FEATURES",

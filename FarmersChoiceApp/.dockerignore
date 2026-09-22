@@ -8,3 +8,11 @@ recommendation_data.db
 *.db-wal
 .env
 .env.*
+Tests.py
+Login_System.py
+pages/
+assets/
+docs/
+.github/
+qodana.yaml
+docker-compose.yml

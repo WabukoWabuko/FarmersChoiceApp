@@ -89,6 +89,28 @@ class RecommendationTests(unittest.TestCase):
         self.assertGreater(maize["suitability"], 0)
         self.assertGreater(sorghum["suitability"], 0)
 
+    def test_farm_health_score_and_risk_layer_are_available(self):
+        recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
+        values = {"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203}
+        health = recommender.assess_farm_health(values, "rice")
+        self.assertIn("overall_health", health)
+        self.assertIn("water_stress", health)
+        self.assertIn("risk_level", health)
+        self.assertGreaterEqual(health["overall_health"], 0)
+        self.assertLessEqual(health["overall_health"], 100)
+        self.assertGreater(len(health["recommendations"]), 0)
+
+    def test_operations_plan_prioritizes_field_actions(self):
+        recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
+        values = {"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203}
+        plan = recommender.build_operations_plan(values, "rice")
+        self.assertIn("irrigation", plan)
+        self.assertIn("fertilization", plan)
+        self.assertIn("pest_monitoring", plan)
+        self.assertIn("yield_risk", plan)
+        self.assertIn("priority", plan["irrigation"])
+        self.assertGreater(len(plan["tasks"]), 0)
+
 
 if __name__ == "__main__":
     unittest.main()

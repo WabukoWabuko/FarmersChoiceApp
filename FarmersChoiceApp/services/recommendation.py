@@ -370,6 +370,110 @@ class CropRecommender:
             "reason": "Conditions are generally suitable for early planting across the season.",
         }
 
+    def assess_farm_health(self, values: dict[str, float], crop_name: str) -> dict[str, object]:
+        rainfall = float(values.get("rainfall", 0.0))
+        temperature = float(values.get("temperature", 0.0))
+        humidity = float(values.get("humidity", 0.0))
+        ph = float(values.get("ph", 6.5))
+        nitrogen = float(values.get("N", 0.0))
+        phosphorus = float(values.get("P", 0.0))
+        potassium = float(values.get("K", 0.0))
+
+        rainfall_score = max(0.0, min(100.0, 100.0 - abs(rainfall - 220.0) * 0.3))
+        temp_score = max(0.0, min(100.0, 100.0 - abs(temperature - 25.0) * 4.0))
+        humidity_score = max(0.0, min(100.0, 100.0 - abs(humidity - 70.0) * 0.65))
+        ph_score = max(0.0, min(100.0, 100.0 - abs(ph - 6.5) * 25.0))
+        nutrient_score = max(0.0, min(100.0, (nitrogen + phosphorus + potassium) / 3.0))
+
+        overall_health = round((rainfall_score + temp_score + humidity_score + ph_score + nutrient_score) / 5.0, 1)
+
+        if rainfall_score < 60:
+            water_stress = "High"
+        elif rainfall_score < 75:
+            water_stress = "Moderate"
+        else:
+            water_stress = "Low"
+
+        if overall_health >= 80:
+            risk_level = "Low"
+        elif overall_health >= 65:
+            risk_level = "Moderate"
+        else:
+            risk_level = "High"
+
+        recommendations: list[str] = []
+        if water_stress != "Low":
+            recommendations.append("Increase soil moisture monitoring and prepare irrigation support during the next dry spell.")
+        if ph_score < 70:
+            recommendations.append("Adjust pH balance before planting to improve nutrient uptake and root establishment.")
+        if nutrient_score < 70:
+            recommendations.append("Plan a nutrient top-up to correct nitrogen, phosphorus, or potassium imbalance.")
+        if not recommendations:
+            recommendations.append(f"Current field conditions are well aligned with {crop_name.title()} and require only routine monitoring.")
+
+        return {
+            "overall_health": overall_health,
+            "water_stress": water_stress,
+            "risk_level": risk_level,
+            "rainfall_score": round(rainfall_score, 1),
+            "temperature_score": round(temp_score, 1),
+            "humidity_score": round(humidity_score, 1),
+            "soil_ph_score": round(ph_score, 1),
+            "nutrient_score": round(nutrient_score, 1),
+            "recommendations": recommendations,
+        }
+
+    def build_operations_plan(self, values: dict[str, float], crop_name: str) -> dict[str, object]:
+        health = self.assess_farm_health(values, crop_name)
+        rainfall = float(values.get("rainfall", 0.0))
+        temperature = float(values.get("temperature", 0.0))
+        humidity = float(values.get("humidity", 0.0))
+        nitrogen = float(values.get("N", 0.0))
+
+        irrigation_priority = "high" if health["water_stress"] == "High" else "medium" if health["water_stress"] == "Moderate" else "low"
+        irrigation = {
+            "priority": irrigation_priority,
+            "action": "Inspect irrigation and water the field within 24 hours." if irrigation_priority == "high" else "Check soil moisture before the next irrigation cycle.",
+            "reason": "Rainfall is below the field's preferred moisture range." if rainfall < 200 else "Maintain a regular moisture check to avoid water stress.",
+        }
+
+        fertilizer_priority = "high" if health["nutrient_score"] < 55 else "medium" if health["nutrient_score"] < 70 else "low"
+        fertilization = {
+            "priority": fertilizer_priority,
+            "action": "Apply a measured nutrient top-up after confirming the soil test." if fertilizer_priority != "low" else "Review the nutrient plan at the next field visit.",
+            "reason": f"Average NPK signal is {health['nutrient_score']}/100.",
+        }
+
+        pest_priority = "high" if humidity >= 85 and temperature >= 25 else "medium" if humidity >= 75 else "low"
+        pest_monitoring = {
+            "priority": pest_priority,
+            "action": "Scout leaves and stems for fungal or insect pressure this week." if pest_priority != "low" else "Continue weekly pest scouting.",
+            "reason": "Warm, humid conditions can increase disease pressure." if pest_priority == "high" else "Current conditions support routine monitoring.",
+        }
+
+        yield_risk = "high" if health["overall_health"] < 60 else "moderate" if health["overall_health"] < 78 else "low"
+        yield_risk_detail = {
+            "level": yield_risk,
+            "score": round(max(0.0, 100.0 - float(health["overall_health"])), 1),
+            "reason": "Yield outlook is sensitive to unresolved water, temperature, or nutrient stress." if yield_risk != "low" else "Yield outlook is stable if the current field conditions persist.",
+        }
+
+        tasks = [
+            {"category": "Irrigation", "priority": irrigation["priority"], "action": irrigation["action"]},
+            {"category": "Fertilization", "priority": fertilization["priority"], "action": fertilization["action"]},
+            {"category": "Pest monitoring", "priority": pest_monitoring["priority"], "action": pest_monitoring["action"]},
+        ]
+        priority_order = {"high": 0, "medium": 1, "low": 2}
+        tasks.sort(key=lambda task: priority_order[task["priority"]])
+        return {
+            "crop": crop_name.title(),
+            "irrigation": irrigation,
+            "fertilization": fertilization,
+            "pest_monitoring": pest_monitoring,
+            "yield_risk": yield_risk_detail,
+            "tasks": tasks,
+        }
+
     def simulate_crop(self, values: dict[str, float], crop_name: str) -> dict[str, object]:
         rainfall = float(values.get("rainfall", 0.0))
         temperature = float(values.get("temperature", 0.0))

@@ -122,6 +122,8 @@ def main(page: ft.Page) -> None:
         alert_list = ft.Column([], spacing=8)
         event_rows = ft.Column([], spacing=8)
         history_rows = ft.Column([], spacing=8)
+        operations_rows = ft.Column([], spacing=8)
+        field_health = ft.Text("Field health: not assessed yet", color="#526257")
         planting_window = ft.Text("Planting window: no recommendation yet", color="#526257")
         freshness_panel = ft.Text("Data freshness: Weather 37 min ago • Soil revision 2026-03", color="#526257")
         scenario_rows = ft.Column([], spacing=8)
@@ -174,6 +176,8 @@ def main(page: ft.Page) -> None:
         def update_dashboard(values: dict[str, float]) -> None:
             answer = recommender.recommend(values)
             explanation = recommender.explain_recommendation(values)
+            health = recommender.assess_farm_health(values, answer.crop)
+            operations = recommender.build_operations_plan(values, answer.crop)
             crop = answer.crop
             alerts = recommender.generate_alerts(values, crop)
             window = recommender.calculate_planting_window(values, crop)
@@ -242,6 +246,36 @@ def main(page: ft.Page) -> None:
 
             planting_window.value = f"Recommended planting window: {crop_window} | Best conditions: {window['best_window']} | Confidence: {window['confidence']}"
             market_status.value = f"Market outlook: stable to favourable for {crop.lower()} across the current region."
+            field_health.value = (
+                f"Field health: {health['overall_health']}/100 • Water stress: {health['water_stress']} • Risk: {health['risk_level']}"
+            )
+            operations_rows.controls = [
+                ft.Container(
+                    content=ft.Row([
+                        ft.Container(
+                            content=ft.Text(task["priority"].upper(), size=10, weight=ft.FontWeight.BOLD, color="white"),
+                            bgcolor="#B45309" if task["priority"] == "high" else "#D97706" if task["priority"] == "medium" else "#2B7A4B",
+                            padding=6,
+                            border_radius=8,
+                        ),
+                        ft.Column([
+                            ft.Text(task["category"], size=13, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                            ft.Text(task["action"], size=12, color="#526257"),
+                        ], spacing=2, expand=True),
+                    ], spacing=10),
+                    padding=10,
+                    bgcolor="#F7FAF7",
+                    border_radius=12,
+                )
+                for task in operations["tasks"]
+            ]
+            operations_rows.controls.append(
+                ft.Text(
+                    f"Yield risk: {operations['yield_risk']['level'].title()} • {operations['yield_risk']['reason']}",
+                    size=12,
+                    color="#526257",
+                )
+            )
             freshness_panel.value = (
                 f"Data freshness: Weather {freshness['Weather']['updated_minutes_ago']} min ago • "
                 f"Satellite {freshness['Satellite']['updated_days_ago']} days ago • "
@@ -351,6 +385,7 @@ def main(page: ft.Page) -> None:
                     result,
                     ft.Text("Key drivers", size=14, weight=ft.FontWeight.BOLD, color="#214336"),
                     details,
+                    field_health,
                     planting_window,
                     freshness_panel,
                     market_status,
@@ -385,6 +420,15 @@ def main(page: ft.Page) -> None:
                 content=ft.Column([
                     ft.Text("Farm event stream", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
                     event_rows,
+                ], spacing=12),
+                padding=18,
+                bgcolor="white",
+                border_radius=18,
+            ),
+            ft.Container(
+                content=ft.Column([
+                    ft.Text("Next field actions", size=18, weight=ft.FontWeight.BOLD, color="#173E2B"),
+                    operations_rows,
                 ], spacing=12),
                 padding=18,
                 bgcolor="white",

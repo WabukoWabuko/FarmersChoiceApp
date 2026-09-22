@@ -40,6 +40,21 @@ class RecommendationTests(unittest.TestCase):
         result = recommender.recommend({"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203})
         self.assertEqual(result.crop, "Rice")
 
+    def test_explainable_recommendation_includes_context_and_confidence(self):
+        recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
+        explanation = recommender.explain_recommendation({"N": 90, "P": 42, "K": 43, "temperature": 20.88, "humidity": 82, "ph": 6.5, "rainfall": 203})
+        self.assertIn("Rice", explanation.crop)
+        self.assertGreaterEqual(explanation.suitability, 0)
+        self.assertLessEqual(explanation.suitability, 100)
+        self.assertGreater(len(explanation.reasons), 0)
+        self.assertGreater(len(explanation.data_confidence), 0)
+        self.assertIn("why", explanation.summary.lower())
+
+    def test_data_manager_exposes_provider_abstraction(self):
+        recommender = CropRecommender(Path(__file__).parent / "Crop_recommendation.csv")
+        self.assertTrue(hasattr(recommender.data_manager, "get_weather"))
+        self.assertTrue(hasattr(recommender.data_manager, "get_soil"))
+
 
 if __name__ == "__main__":
     unittest.main()

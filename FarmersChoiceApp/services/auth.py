@@ -5,6 +5,7 @@ import hmac
 import os
 import secrets
 import sqlite3
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -33,8 +34,17 @@ class AuthService:
         connection.row_factory = sqlite3.Row
         return connection
 
+    @contextmanager
+    def _connection(self):
+        connection = self._connect()
+        try:
+            yield connection
+            connection.commit()
+        finally:
+            connection.close()
+
     def _initialize(self) -> None:
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute("""
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -88,7 +98,7 @@ class AuthService:
     def register(self, name: str, email: str, password: str, department: str, semester: str) -> User:
         name, email, password, department, semester = self._validate(name, email, password, department, semester)
         try:
-            with self._connect() as connection:
+            with self._connection() as connection:
                 cursor = connection.execute(
                     "INSERT INTO users (name, email, department, semester, password_hash) VALUES (?, ?, ?, ?, ?)",
                     (name, email, department, semester, self._hash_password(password)),
@@ -98,7 +108,7 @@ class AuthService:
             raise AuthError("An account with that email already exists.") from error
 
     def login(self, email: str, password: str) -> User:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute("SELECT * FROM users WHERE email = ?", (email.strip().lower(),)).fetchone()
         if not row or not self._verify_password(password, row["password_hash"]):
             raise AuthError("Email or password is incorrect.")
@@ -107,7 +117,7 @@ class AuthService:
     def update_profile(self, user_id: int, name: str, department: str, semester: str) -> User:
         if not name.strip() or not department.strip() or not semester.strip():
             raise AuthError("Please complete every profile field.")
-        with self._connect() as connection:
+        with self._connection() as connection:
             connection.execute("UPDATE users SET name = ?, department = ?, semester = ? WHERE id = ?", (name.strip(), department.strip(), semester.strip(), user_id))
             row = connection.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
         if not row:
@@ -115,7 +125,7 @@ class AuthService:
         return User(row["id"], row["name"], row["email"], row["department"], row["semester"])
 
     def create_reset_token(self, email: str) -> str:
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute("SELECT id FROM users WHERE email = ?", (email.strip().lower(),)).fetchone()
             if not row:
                 raise AuthError("No account was found for that email.")
@@ -126,7 +136,7 @@ class AuthService:
     def reset_password(self, token: str, password: str) -> None:
         if len(password) < 8:
             raise AuthError("Password must contain at least 8 characters.")
-        with self._connect() as connection:
+        with self._connection() as connection:
             row = connection.execute("SELECT id, user_id FROM password_reset_tokens WHERE token = ? AND used = 0 AND expires_at > datetime('now')", (token.strip(),)).fetchone()
             if not row:
                 raise AuthError("That reset code is invalid or expired.")

@@ -1,0 +1,13 @@
+services:
+  farmers-choice:
+    build: .
+    ports:
+      - "8550:8550"
+    environment:
+      PORT: 8550
+      DATABASE_PATH: /data/user_data.db
+    volumes:
+      - farmers_choice_data:/data
+
+volumes:
+  farmers_choice_data:
